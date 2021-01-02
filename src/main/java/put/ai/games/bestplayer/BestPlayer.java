@@ -9,7 +9,7 @@ import put.ai.games.game.Player;
 
 public class BestPlayer extends Player {
 
-  private final Algorithm algorithm = new MiniMaxAlgorithm(new DistanceHeuristic());
+  private final Algorithm algorithm = new MiniMaxAlgorithm(new GroupedCounterHeuristic());
 
   @Override
   public String getName() {
@@ -20,6 +20,8 @@ public class BestPlayer extends Player {
   public Move nextMove(Board board) {
     return algorithm.nextMove(getColor(), board, getTime());
   }
+
+  public static void main(String[] args) {}
 
   /**
    * Object containing move and it's heuristic value
@@ -184,6 +186,98 @@ public class BestPlayer extends Player {
   }
 
   /**
+   * Counts grouped ???sheeps???
+   *
+   * Returns sum of squares of those counts divided by square of all
+   * (don't want to simply loose sheeps)
+   */
+  private static class GroupedCounterHeuristic implements Heuristic {
+
+    @Override
+    public double getScore(Color maximizingPlayer, Board board) {
+      Color winner = board.getWinner(maximizingPlayer);
+      if (winner != null) {
+        if (winner == maximizingPlayer) {
+          return Double.POSITIVE_INFINITY;
+        } else if (winner == Color.EMPTY) {
+          return 0;
+        } else {
+          return Double.NEGATIVE_INFINITY;
+        }
+      }
+
+      return getPlayerScore(maximizingPlayer, board) -
+          getPlayerScore(Player.getOpponent(maximizingPlayer), board);
+    }
+
+    private static double getPlayerScore(Color player, Board board) {
+      int size = board.getSize();
+      boolean[][] visited = new boolean[size][size];
+
+      int all = countAll(player, board, size);
+      int count = 0;
+      int score = 0;
+
+      for (int i = 0; i < size; ++i) {
+        for (int j = 0; j < size; ++j) {
+          if (!visited[i][j]) {
+            visited[i][j] = true;
+            if (board.getState(i, j) == player) {
+              int groupedCount = countNeighbours(player, board, i, j, visited, size);
+              count += groupedCount;
+              score += groupedCount * groupedCount;
+
+              if (count == all) {
+                return (double) score / (all * all);
+              }
+            }
+          }
+        }
+      }
+
+      return -1;
+    }
+
+    private static int countAll(Color player, Board board, int size) {
+      int count = 0;
+      for (int i = 0; i < size; ++i) {
+        for (int j = 0; j < size; ++j) {
+          if (board.getState(i, j) == player) {
+            ++count;
+          }
+        }
+      }
+      return count;
+    }
+  }
+
+  private static int countNeighbours(Color player, Board board, int x, int y,
+                                     boolean[][] visited, int size) {
+    int count = 1;
+
+    for (int i = -1; i < 2; ++i) {
+      for (int j = -1; j < 2; ++j) {
+        if (i == 0 && j == 0) {
+          continue;
+        }
+
+        int currX = x + i;
+        int currY = y + j;
+        if (currX < 0 || currX >= size || currY < 0 || currY >= size) {
+          continue;
+        }
+
+        if (!visited[currX][currY] && board.getState(currX, currY) == player) {
+          visited[x][y] = true;
+          count += countNeighbours(player, board, currX, currY, visited, size);
+        }
+      }
+    }
+
+    return count;
+  }
+
+  /**
    * Interface of algorithm used to determine next move
    */
   private interface Algorithm {
@@ -256,8 +350,12 @@ public class BestPlayer extends Player {
    */
   private static class MiniMaxAlgorithm extends HeuristicAlgorithm {
 
+    // Stores number of nodes evaluated in single nextMove call
+    private int nodeCount;
+
     private final static double usableTimePercent = 0.85;
     private final static long reserveTime = 50;
+    private final static int maxAllowedDepth = 10;
 
     public MiniMaxAlgorithm(Heuristic heuristic) {
       super(heuristic);
@@ -274,7 +372,8 @@ public class BestPlayer extends Player {
       Move bestMove = null;
       boolean run = true;
 
-      for (int depth = 1; run; ++depth) {
+      nodeCount = 0;
+      for (int depth = 1; run && depth < maxAllowedDepth; ++depth) {
         try {
           bestMove = miniMax(player, player, board,
               Double.NEGATIVE_INFINITY, Double.POSITIVE_INFINITY,
@@ -282,10 +381,11 @@ public class BestPlayer extends Player {
         } catch (AlgorithmTimeoutException ex) {
           run = false;
           System.err.println(String.format(
-              "Move %s found in %dms with depth %d",
+              "Move %s found in %dms with depth %d, %d nodes evaluated",
               bestMove,
               System.currentTimeMillis() - startTime,
-              depth - 1
+              depth - 1,
+              nodeCount
           ));
         }
       }
@@ -304,6 +404,7 @@ public class BestPlayer extends Player {
       // Evaluate board if reached maxDepth or game ended
       if (depth == maxDepth || board.getWinner(current) != null) {
         double score = getHeuristicScore(maximizingPlayer, board);
+        ++nodeCount;
         return new EvaluatedMove(score, null);
       }
 
