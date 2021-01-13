@@ -10,7 +10,7 @@ public class BestPlayer extends Player {
 
   private final MaxTimeCalculator maxTimeCalculator =
       new ConstantMaxTimeCalculator(100);
-  private final Algorithm algorithm = new MiniMaxAlgorithm(new DistanceHeuristic());
+  private final Algorithm algorithm = new MiniMaxAlgorithm(new AltDistanceHeuristic());
 
   @Override
   public String getName() {
@@ -295,8 +295,7 @@ public class BestPlayer extends Player {
       Collection<Point> opponentPoints = getAllPoints(
           Player.getOpponent(maximizingPlayer), board);
 
-      return getSingleScore(opponentPoints) -
-          getSingleScore(playerPoints);
+      return getSingleScore(board, playerPoints) - getSingleScore(board, opponentPoints);
     }
 
     private static Collection<Point> getAllPoints(Color color, Board board) {
@@ -342,12 +341,41 @@ public class BestPlayer extends Player {
       return sum + pointCount * (distance - 1);
     }
 
-    private int getSingleScore(Collection<Point> points) {
+    private double getQuadScore(Board board, Collection<Point> points) {
+      int size = board.getSize();
+      int[][] piece = new int[size + 2][size + 2];
+      for (Point point : points) {
+        piece[point.getX() + 1][point.getY() + 1] = 1;
+      }
+
+      int[] quadCount = new int[6];
+      for (int i = 0; i <= size; ++i) {
+        for (int j = 0; j <= size; ++j) {
+          int count = piece[i][j] + piece[i + 1][j] + piece[i][j + 1] + piece[i + 1][j + 1];
+          if (count == 2) {
+            if (((piece[i][j] == 1) && (piece[i + 1][j + 1]) == 1) ||
+                ((piece[i + 1][j] == 1) && (piece[i][j + 1]) == 1)) {
+              ++quadCount[5];
+            } else {
+              ++quadCount[2];
+            }
+          } else {
+            ++quadCount[count];
+          }
+        }
+      }
+
+      return (quadCount[1] - quadCount[3] - 2 * quadCount[5]) / 4.0;
+    }
+
+    private double getSingleScore(Board board, Collection<Point> points) {
       Point center = getCenter(points);
-      return (
-          getSumOfDistances(center, points)
-              - getMinSumOfDistances(points.size())
-      ) / points.size();
+      int sumOfDistances = getSumOfDistances(center, points);
+      int minSumOfDistances = getMinSumOfDistances(points.size());
+      int diffOfSums = sumOfDistances - minSumOfDistances;
+      double avgDistance = (double)diffOfSums / points.size();
+      double quadScore = getQuadScore(board, points);
+      return quadScore - (diffOfSums + avgDistance);
     }
 
     private static class Point {
